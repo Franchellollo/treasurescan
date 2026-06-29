@@ -38,6 +38,17 @@ Open the local URL shown in the terminal.
 
 If camera permission fails, use **Upload photo** as the fallback path.
 
+## Scan Mode
+
+Use **Treasure Scan** when you have a full table, shelf, or mixed flea-market photo.
+
+1. Tap **Capture or upload photo**.
+2. Tap **Scan image**.
+3. Tap one highlighted object.
+4. Tap **Analyze this item** to run the value-analysis flow for that selected object.
+
+The browser resizes large images before upload. The server also rejects images that are still too large.
+
 ## MVP Scope
 
 Included:
@@ -45,6 +56,7 @@ Included:
 - Mobile-first dark interface
 - Live browser camera preview with rear camera preference
 - Fallback image upload
+- Scan Mode for table or shelf photos with clickable AI-detected bounding boxes
 - Frame capture to canvas
 - Next.js API route for analysis
 - OpenAI Vision request with structured JSON

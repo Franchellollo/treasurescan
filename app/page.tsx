@@ -1,4 +1,5 @@
 import { CameraScanner } from "@/components/CameraScanner";
+import { ScanMode } from "@/components/ScanMode";
 
 export default function Home() {
   return (
@@ -16,6 +17,7 @@ export default function Home() {
           </p>
         </header>
 
+        <ScanMode />
         <CameraScanner />
       </div>
     </main>

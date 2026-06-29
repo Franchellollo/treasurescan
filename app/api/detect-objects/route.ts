@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { analyzeFrameWithOpenAI } from "@/lib/openai";
+import { detectInterestingObjectsWithOpenAI } from "@/lib/openai";
 
 export const runtime = "nodejs";
 
-type AnalyzeFrameRequest = {
+type DetectObjectsRequest = {
   imageBase64?: unknown;
-  objectContext?: unknown;
 };
 
 function isValidImageDataUrl(value: unknown): value is string {
@@ -17,10 +16,10 @@ function isReasonableImageSize(value: string): boolean {
 }
 
 export async function POST(request: NextRequest) {
-  let body: AnalyzeFrameRequest;
+  let body: DetectObjectsRequest;
 
   try {
-    body = (await request.json()) as AnalyzeFrameRequest;
+    body = (await request.json()) as DetectObjectsRequest;
   } catch {
     return NextResponse.json({ error: "Request body must be valid JSON." }, { status: 400 });
   }
@@ -40,11 +39,10 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const objectContext = typeof body.objectContext === "string" ? body.objectContext.slice(0, 500) : undefined;
-    const result = await analyzeFrameWithOpenAI(body.imageBase64, objectContext);
+    const result = await detectInterestingObjectsWithOpenAI(body.imageBase64);
     return NextResponse.json(result);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not analyze the frame.";
+    const message = error instanceof Error ? error.message : "Scan failed, try another image.";
     const status = message.includes("OPENAI_API_KEY") ? 500 : 502;
 
     return NextResponse.json({ error: message }, { status });
