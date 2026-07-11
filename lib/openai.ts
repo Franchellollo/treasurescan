@@ -6,23 +6,7 @@ export type AnalyzeFrameResult = {
   warning: string;
 };
 
-export type ScanObject = {
-  label: string;
-  confidence: number;
-  reason: string;
-  box: {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  };
-};
-
-export type DetectInterestingObjectsResult = {
-  objects: ScanObject[];
-};
-
-const baseVisionPrompt = `Analyze this camera frame as an expert assistant for identifying potentially valuable old objects in thrift stores, attics, flea markets, church restorations, and demolition/restoration sites.
+const visionPrompt = `Analyze this camera frame as an expert assistant for identifying potentially valuable old objects in thrift stores, attics, flea markets, church restorations, and demolition/restoration sites.
 
 Your job is not to be certain. Your job is to help the user decide what deserves attention.
 
@@ -42,31 +26,6 @@ Look for:
 Do not overstate certainty.
 Be cautious with value estimates.
 If the image is unclear, say what should be photographed next.
-Return only valid JSON.`;
-
-const detectionPrompt = `Analyze this flea-market, thrift-store, shelf, table, attic, or restoration-site image.
-
-Detect only potentially interesting objects. Do not list every visible object.
-
-Interesting examples include:
-- vintage electronics
-- speakers
-- cameras
-- tools
-- watches
-- ceramics
-- glassware
-- old toys
-- musical equipment
-- branded items
-- unusual design objects
-- antique-looking items
-
-Return max 5 objects.
-Bounding box coordinates must be percentages from 0 to 100.
-x and y are the top-left corner.
-width and height are the box size.
-If no interesting objects are found, return {"objects":[]}.
 Return only valid JSON.`;
 
 const responseSchema = {
@@ -115,39 +74,6 @@ const responseSchema = {
     warning: { type: "string" },
   },
   required: ["scene_summary", "objects", "warning"],
-} as const;
-
-const detectionSchema = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    objects: {
-      type: "array",
-      maxItems: 5,
-      items: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          label: { type: "string" },
-          confidence: { type: "number", minimum: 0, maximum: 1 },
-          reason: { type: "string" },
-          box: {
-            type: "object",
-            additionalProperties: false,
-            properties: {
-              x: { type: "number", minimum: 0, maximum: 100 },
-              y: { type: "number", minimum: 0, maximum: 100 },
-              width: { type: "number", minimum: 0, maximum: 100 },
-              height: { type: "number", minimum: 0, maximum: 100 },
-            },
-            required: ["x", "y", "width", "height"],
-          },
-        },
-        required: ["label", "confidence", "reason", "box"],
-      },
-    },
-  },
-  required: ["objects"],
 } as const;
 
 function extractResponseText(payload: unknown): string {
@@ -204,35 +130,7 @@ function normalizeByScore(object: ObjectResult): ObjectResult {
   };
 }
 
-function clampPercent(value: number): number {
-  return Math.max(0, Math.min(100, Number(value) || 0));
-}
-
-function normalizeScanObject(object: ScanObject): ScanObject {
-  const x = clampPercent(object.box?.x);
-  const y = clampPercent(object.box?.y);
-  const width = Math.min(clampPercent(object.box?.width), 100 - x);
-  const height = Math.min(clampPercent(object.box?.height), 100 - y);
-
-  return {
-    label: object.label || "interesting object",
-    confidence: Math.max(0, Math.min(1, Number(object.confidence) || 0)),
-    reason: object.reason || "This object may be worth checking more closely.",
-    box: { x, y, width, height },
-  };
-}
-
-async function callOpenAIJson({
-  imageBase64,
-  prompt,
-  schemaName,
-  schema,
-}: {
-  imageBase64: string;
-  prompt: string;
-  schemaName: string;
-  schema: object;
-}): Promise<unknown> {
+export async function analyzeFrameWithOpenAI(imageBase64: string): Promise<AnalyzeFrameResult> {
   const apiKey = process.env.OPENAI_API_KEY;
 
   if (!apiKey) {
@@ -251,7 +149,7 @@ async function callOpenAIJson({
         {
           role: "user",
           content: [
-            { type: "input_text", text: prompt },
+            { type: "input_text", text: visionPrompt },
             { type: "input_image", image_url: imageBase64 },
           ],
         },
@@ -259,9 +157,9 @@ async function callOpenAIJson({
       text: {
         format: {
           type: "json_schema",
-          name: schemaName,
+          name: "treasurescan_analysis",
           strict: true,
-          schema,
+          schema: responseSchema,
         },
       },
     }),
@@ -282,51 +180,16 @@ async function callOpenAIJson({
     throw new Error("OpenAI returned an empty analysis.");
   }
 
+  let parsed: AnalyzeFrameResult;
   try {
-    return JSON.parse(text) as unknown;
+    parsed = JSON.parse(text) as AnalyzeFrameResult;
   } catch {
-    throw new Error("OpenAI returned a response that was not valid JSON.");
+    throw new Error("OpenAI returned analysis that was not valid JSON.");
   }
-}
-
-export async function analyzeFrameWithOpenAI(
-  imageBase64: string,
-  objectContext?: string,
-): Promise<AnalyzeFrameResult> {
-  const contextPrompt = objectContext
-    ? `${baseVisionPrompt}
-
-Focus especially on this selected object: ${objectContext}.
-If other objects are visible, mention them only when they help identify or value the selected item.`
-    : baseVisionPrompt;
-
-  const parsed = (await callOpenAIJson({
-    imageBase64,
-    prompt: contextPrompt,
-    schemaName: "treasurescan_analysis",
-    schema: responseSchema,
-  })) as AnalyzeFrameResult;
 
   return {
     scene_summary: parsed.scene_summary || "",
     objects: Array.isArray(parsed.objects) ? parsed.objects.map(normalizeByScore) : [],
     warning: parsed.warning || "",
-  };
-}
-
-export async function detectInterestingObjectsWithOpenAI(
-  imageBase64: string,
-): Promise<DetectInterestingObjectsResult> {
-  const parsed = (await callOpenAIJson({
-    imageBase64,
-    prompt: detectionPrompt,
-    schemaName: "treasurescan_object_detection",
-    schema: detectionSchema,
-  })) as DetectInterestingObjectsResult;
-
-  return {
-    objects: Array.isArray(parsed.objects)
-      ? parsed.objects.slice(0, 5).map(normalizeScanObject).filter((object) => object.box.width > 0 && object.box.height > 0)
-      : [],
   };
 }

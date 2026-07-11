@@ -5,15 +5,10 @@ export const runtime = "nodejs";
 
 type AnalyzeFrameRequest = {
   imageBase64?: unknown;
-  objectContext?: unknown;
 };
 
 function isValidImageDataUrl(value: unknown): value is string {
   return typeof value === "string" && /^data:image\/(png|jpe?g|webp);base64,/.test(value);
-}
-
-function isReasonableImageSize(value: string): boolean {
-  return value.length <= 7_000_000;
 }
 
 export async function POST(request: NextRequest) {
@@ -32,16 +27,8 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (!isReasonableImageSize(body.imageBase64)) {
-    return NextResponse.json(
-      { error: "Image is too large. Use a smaller or compressed image." },
-      { status: 413 },
-    );
-  }
-
   try {
-    const objectContext = typeof body.objectContext === "string" ? body.objectContext.slice(0, 500) : undefined;
-    const result = await analyzeFrameWithOpenAI(body.imageBase64, objectContext);
+    const result = await analyzeFrameWithOpenAI(body.imageBase64);
     return NextResponse.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not analyze the frame.";
