@@ -26,6 +26,9 @@ Look for:
 Do not overstate certainty.
 Be cautious with value estimates.
 If the image is unclear, say what should be photographed next.
+For every object, place one approximate marker at the visual center of that object.
+Marker x and y must be percentages from 0 to 100, measured from the image's top-left corner.
+Only include objects that can be located clearly in the image.
 Return only valid JSON.`;
 
 const responseSchema = {
@@ -54,6 +57,15 @@ const responseSchema = {
           },
           recommendation: { type: "string", enum: ["IGNORE", "CHECK", "SAVE", "EXPERT"] },
           reasoning_summary: { type: "string" },
+          marker: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              x: { type: "number", minimum: 0, maximum: 100 },
+              y: { type: "number", minimum: 0, maximum: 100 },
+            },
+            required: ["x", "y"],
+          },
         },
         required: [
           "object_name",
@@ -68,6 +80,7 @@ const responseSchema = {
           "what_to_photograph_next",
           "recommendation",
           "reasoning_summary",
+          "marker",
         ],
       },
     },
@@ -103,6 +116,15 @@ function extractResponseText(payload: unknown): string {
 function normalizeByScore(object: ObjectResult): ObjectResult {
   const worthScore = Math.max(0, Math.min(100, Number(object.worth_score) || 0));
   const confidenceScore = Math.max(0, Math.min(100, Number(object.confidence_score) || 0));
+  const markerX = Number(object.marker?.x);
+  const markerY = Number(object.marker?.y);
+  const marker =
+    Number.isFinite(markerX) && Number.isFinite(markerY)
+      ? {
+          x: Math.max(2, Math.min(98, markerX)),
+          y: Math.max(2, Math.min(98, markerY)),
+        }
+      : null;
 
   let indicator_color: ObjectResult["indicator_color"] = "red";
   let recommendation: ObjectResult["recommendation"] = "IGNORE";
@@ -124,6 +146,7 @@ function normalizeByScore(object: ObjectResult): ObjectResult {
     confidence_score: confidenceScore,
     indicator_color,
     recommendation,
+    marker,
     what_to_photograph_next: Array.isArray(object.what_to_photograph_next)
       ? object.what_to_photograph_next
       : [],

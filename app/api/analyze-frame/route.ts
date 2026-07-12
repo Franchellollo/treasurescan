@@ -3,6 +3,9 @@ import { analyzeFrameWithOpenAI } from "@/lib/openai";
 
 export const runtime = "nodejs";
 
+const MAX_REQUEST_BYTES = 4_100_000;
+const MAX_IMAGE_DATA_URL_LENGTH = 4_000_000;
+
 type AnalyzeFrameRequest = {
   imageBase64?: unknown;
 };
@@ -12,6 +15,14 @@ function isValidImageDataUrl(value: unknown): value is string {
 }
 
 export async function POST(request: NextRequest) {
+  const contentLength = Number(request.headers.get("content-length") || 0);
+  if (contentLength > MAX_REQUEST_BYTES) {
+    return NextResponse.json(
+      { error: "Image is too large. Upload a smaller photo." },
+      { status: 413 },
+    );
+  }
+
   let body: AnalyzeFrameRequest;
 
   try {
@@ -24,6 +35,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       { error: "imageBase64 is required and must be a base64 image data URL." },
       { status: 400 },
+    );
+  }
+
+  if (body.imageBase64.length > MAX_IMAGE_DATA_URL_LENGTH) {
+    return NextResponse.json(
+      { error: "Image is too large. Upload a smaller photo." },
+      { status: 413 },
     );
   }
 

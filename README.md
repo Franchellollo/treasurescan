@@ -46,6 +46,9 @@ Included:
 - Live browser camera preview with rear camera preference
 - Fallback image upload
 - Frame capture to canvas
+- Captured-frame preview with clear analysis progress and automatic result focus
+- Numbered approximate object markers linked to result cards
+- Client-side image resizing and server-side image size validation
 - Next.js API route for analysis
 - OpenAI Vision request with structured JSON
 - Result cards with indicator color, score, period, value range, recommendation, and next photo suggestions

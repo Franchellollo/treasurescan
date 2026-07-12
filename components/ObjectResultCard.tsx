@@ -1,5 +1,10 @@
 export type IndicatorColor = "green" | "yellow" | "orange" | "red";
 
+export type ObjectMarker = {
+  x: number;
+  y: number;
+};
+
 export type ObjectResult = {
   object_name: string;
   likely_category: string;
@@ -13,13 +18,14 @@ export type ObjectResult = {
   what_to_photograph_next: string[];
   recommendation: "IGNORE" | "CHECK" | "SAVE" | "EXPERT";
   reasoning_summary: string;
+  marker: ObjectMarker | null;
 };
 
 const colorClasses: Record<IndicatorColor, string> = {
-  green: "bg-emerald-400 shadow-emerald-400/35",
-  yellow: "bg-yellow-300 shadow-yellow-300/35",
-  orange: "bg-orange-400 shadow-orange-400/35",
-  red: "bg-red-500 shadow-red-500/35",
+  green: "bg-emerald-400 text-stone-950 shadow-emerald-400/35",
+  yellow: "bg-yellow-300 text-stone-950 shadow-yellow-300/35",
+  orange: "bg-orange-400 text-stone-950 shadow-orange-400/35",
+  red: "bg-red-500 text-white shadow-red-500/35",
 };
 
 const recommendationClasses: Record<ObjectResult["recommendation"], string> = {
@@ -31,16 +37,22 @@ const recommendationClasses: Record<ObjectResult["recommendation"], string> = {
 
 type ObjectResultCardProps = {
   result: ObjectResult;
+  itemNumber: number;
 };
 
-export function ObjectResultCard({ result }: ObjectResultCardProps) {
+export function ObjectResultCard({ result, itemNumber }: ObjectResultCardProps) {
   return (
-    <article className="rounded-lg border border-stone-700/70 bg-stone-950/68 p-4 shadow-xl shadow-black/20 backdrop-blur">
+    <article
+      id={`treasure-result-${itemNumber}`}
+      className="scroll-mt-4 rounded-lg border border-stone-700/70 bg-stone-950/68 p-4 shadow-xl shadow-black/20 backdrop-blur"
+    >
       <div className="flex items-start gap-3">
         <span
-          aria-label={`${result.indicator_color} value indicator`}
-          className={`mt-1 h-4 w-4 shrink-0 rounded-full shadow-[0_0_22px] ${colorClasses[result.indicator_color]}`}
-        />
+          aria-label={`Item ${itemNumber}, ${result.indicator_color} value indicator`}
+          className={`grid h-7 w-7 shrink-0 place-items-center rounded-full text-xs font-black shadow-[0_0_22px] ${colorClasses[result.indicator_color]}`}
+        >
+          {itemNumber}
+        </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>

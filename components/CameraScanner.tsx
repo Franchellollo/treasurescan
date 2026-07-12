@@ -1,12 +1,21 @@
 "use client";
 
-import { ChangeEvent, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { ChangeEvent } from "react";
 import { ObjectResult, ObjectResultCard } from "./ObjectResultCard";
 
 type AnalyzeResponse = {
   scene_summary: string;
   objects: ObjectResult[];
-  warning?: string;
+  warning: string;
+};
+
+type ScanPhase = "idle" | "preparing" | "ready" | "analyzing" | "complete" | "error";
+
+type PreparedImage = {
+  dataUrl: string;
+  width: number;
+  height: number;
 };
 
 const emptyResponse: AnalyzeResponse = {
@@ -15,14 +24,101 @@ const emptyResponse: AnalyzeResponse = {
   warning: "",
 };
 
+const MAX_SOURCE_FILE_BYTES = 15 * 1024 * 1024;
+const MAX_IMAGE_DIMENSION = 1600;
+const MAX_IMAGE_DATA_URL_LENGTH = 4_000_000;
+const JPEG_QUALITY = 0.82;
+const ANALYSIS_TIMEOUT_MS = 45_000;
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        resolve(reader.result);
+      } else {
+        reject(new Error("Could not read this photo."));
+      }
+    };
+    reader.onerror = () => reject(new Error("Could not read this photo."));
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImage(source: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("This image format is not supported by your browser."));
+    image.src = source;
+  });
+}
+
+function renderImageToJpeg(
+  source: CanvasImageSource,
+  sourceWidth: number,
+  sourceHeight: number,
+  canvas: HTMLCanvasElement,
+): PreparedImage {
+  const scale = Math.min(1, MAX_IMAGE_DIMENSION / Math.max(sourceWidth, sourceHeight));
+  const width = Math.max(1, Math.round(sourceWidth * scale));
+  const height = Math.max(1, Math.round(sourceHeight * scale));
+
+  canvas.width = width;
+  canvas.height = height;
+
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("Could not prepare the image for analysis.");
+  }
+
+  context.fillStyle = "#0c0a09";
+  context.fillRect(0, 0, width, height);
+  context.drawImage(source, 0, 0, width, height);
+
+  const dataUrl = canvas.toDataURL("image/jpeg", JPEG_QUALITY);
+  if (dataUrl.length > MAX_IMAGE_DATA_URL_LENGTH) {
+    throw new Error("This photo is still too large after resizing. Try a smaller image.");
+  }
+
+  return { dataUrl, width, height };
+}
+
+async function prepareUploadedImage(file: File): Promise<PreparedImage> {
+  if (file.type && !file.type.startsWith("image/")) {
+    throw new Error("Choose an image file.");
+  }
+
+  if (file.size > MAX_SOURCE_FILE_BYTES) {
+    throw new Error("Photo is too large. Choose an image smaller than 15 MB.");
+  }
+
+  const source = await readFileAsDataUrl(file);
+  const image = await loadImage(source);
+
+  if (!image.naturalWidth || !image.naturalHeight) {
+    throw new Error("Could not determine the photo size.");
+  }
+
+  return renderImageToJpeg(
+    image,
+    image.naturalWidth,
+    image.naturalHeight,
+    document.createElement("canvas"),
+  );
+}
+
 export function CameraScanner() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const analysisAbortRef = useRef<AbortController | null>(null);
+  const resultsRef = useRef<HTMLDivElement | null>(null);
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraError, setCameraError] = useState("");
-  const [uploadedImage, setUploadedImage] = useState<string>("");
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [capturedImage, setCapturedImage] = useState("");
+  const [imageDimensions, setImageDimensions] = useState({ width: 4, height: 3 });
+  const [phase, setPhase] = useState<ScanPhase>("idle");
   const [analysis, setAnalysis] = useState<AnalyzeResponse>(emptyResponse);
   const [error, setError] = useState("");
 
@@ -31,7 +127,7 @@ export function CameraScanner() {
 
     async function startCamera() {
       if (!navigator.mediaDevices?.getUserMedia) {
-        setCameraError("Camera is not available in this browser.");
+        setCameraError("Camera is not available in this browser. Upload a photo instead.");
         return;
       }
 
@@ -55,6 +151,7 @@ export function CameraScanner() {
           videoRef.current.srcObject = stream;
           await videoRef.current.play();
           setCameraReady(true);
+          setCameraError("");
         }
       } catch {
         if (mounted) {
@@ -67,39 +164,101 @@ export function CameraScanner() {
 
     return () => {
       mounted = false;
+      analysisAbortRef.current?.abort();
       streamRef.current?.getTracks().forEach((track) => track.stop());
     };
   }, []);
 
+  useEffect(() => {
+    if (capturedImage || !videoRef.current || !streamRef.current) return;
+
+    const video = videoRef.current;
+    video.srcObject = streamRef.current;
+    void video.play().then(() => setCameraReady(true)).catch(() => {
+      setCameraError("Could not restart the camera. Upload a photo instead.");
+    });
+  }, [capturedImage]);
+
+  useEffect(() => {
+    if (phase !== "complete") return;
+
+    const frame = window.requestAnimationFrame(() => {
+      resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      resultsRef.current?.focus({ preventScroll: true });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [phase]);
+
   async function analyzeImage(imageBase64: string) {
-    setIsAnalyzing(true);
+    analysisAbortRef.current?.abort();
+    const controller = new AbortController();
+    analysisAbortRef.current = controller;
+    let timedOut = false;
+
+    setPhase("analyzing");
     setError("");
     setAnalysis(emptyResponse);
+
+    const timeout = window.setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, ANALYSIS_TIMEOUT_MS);
 
     try {
       const response = await fetch("/api/analyze-frame", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ imageBase64 }),
+        signal: controller.signal,
       });
 
-      const payload = await response.json();
+      const payload: unknown = await response.json().catch(() => null);
 
       if (!response.ok) {
-        throw new Error(payload.error || "Analysis failed.");
+        const message =
+          payload && typeof payload === "object" && "error" in payload
+            ? String((payload as { error?: unknown }).error || "")
+            : "";
+        throw new Error(message || "Analysis failed.");
       }
 
-      setAnalysis(payload);
+      if (!payload || typeof payload !== "object") {
+        throw new Error("Analysis returned an unexpected response.");
+      }
+
+      const result = payload as Partial<AnalyzeResponse>;
+      setAnalysis({
+        scene_summary: typeof result.scene_summary === "string" ? result.scene_summary : "",
+        objects: Array.isArray(result.objects) ? result.objects : [],
+        warning: typeof result.warning === "string" ? result.warning : "",
+      });
+      setPhase("complete");
     } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Analysis failed.");
+      const wasAborted = caughtError instanceof Error && caughtError.name === "AbortError";
+      if (wasAborted && !timedOut) return;
+
+      setError(
+        timedOut
+          ? "Analysis took too long. Try again or take another photo."
+          : caughtError instanceof Error
+            ? caughtError.message
+            : "Analysis failed.",
+      );
+      setPhase("error");
     } finally {
-      setIsAnalyzing(false);
+      window.clearTimeout(timeout);
+      if (analysisAbortRef.current === controller) {
+        analysisAbortRef.current = null;
+      }
     }
   }
 
   async function handleAnalyzeFrame() {
-    if (uploadedImage) {
-      await analyzeImage(uploadedImage);
+    if (phase === "analyzing" || phase === "preparing") return;
+
+    if (capturedImage) {
+      await analyzeImage(capturedImage);
       return;
     }
 
@@ -111,51 +270,126 @@ export function CameraScanner() {
       return;
     }
 
-    const width = video.videoWidth;
-    const height = video.videoHeight;
-
-    if (!width || !height) {
+    if (!video.videoWidth || !video.videoHeight) {
       setError("Could not capture a clear frame. Try uploading a photo.");
       return;
     }
 
-    canvas.width = width;
-    canvas.height = height;
-    const context = canvas.getContext("2d");
-    if (!context) {
-      setError("Could not prepare the image for analysis.");
-      return;
+    try {
+      const prepared = renderImageToJpeg(
+        video,
+        video.videoWidth,
+        video.videoHeight,
+        canvas,
+      );
+      setCapturedImage(prepared.dataUrl);
+      setImageDimensions({ width: prepared.width, height: prepared.height });
+      await analyzeImage(prepared.dataUrl);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not capture this photo.");
+      setPhase("error");
     }
-
-    context.drawImage(video, 0, 0, width, height);
-    await analyzeImage(canvas.toDataURL("image/jpeg", 0.86));
   }
 
-  function handleFileUpload(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
+  async function handleFileUpload(event: ChangeEvent<HTMLInputElement>) {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === "string") {
-        setUploadedImage(reader.result);
-        setCameraError("");
-        setError("");
-      }
-    };
-    reader.readAsDataURL(file);
+    analysisAbortRef.current?.abort();
+    analysisAbortRef.current = null;
+    setCapturedImage("");
+    setAnalysis(emptyResponse);
+    setError("");
+    setPhase("preparing");
+
+    try {
+      const prepared = await prepareUploadedImage(file);
+      setCapturedImage(prepared.dataUrl);
+      setImageDimensions({ width: prepared.width, height: prepared.height });
+      setPhase("ready");
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not prepare this photo.");
+      setPhase("idle");
+    } finally {
+      input.value = "";
+    }
   }
 
-  const hasResults = analysis.objects.length > 0 || analysis.scene_summary || analysis.warning;
+  function handleBackToCamera() {
+    analysisAbortRef.current?.abort();
+    analysisAbortRef.current = null;
+    setCapturedImage("");
+    setImageDimensions({ width: 4, height: 3 });
+    setAnalysis(emptyResponse);
+    setError("");
+    setPhase("idle");
+  }
+
+  function handleMarkerClick(itemNumber: number) {
+    document
+      .getElementById(`treasure-result-${itemNumber}`)
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  const isBusy = phase === "preparing" || phase === "analyzing";
+  const canAnalyze = Boolean(capturedImage) || cameraReady;
+  const itemCount = analysis.objects.length;
+  const itemLabel = itemCount === 1 ? "item" : "items";
+  const aspectRatio = imageDimensions.width / imageDimensions.height;
+  const capturedImageStyle = {
+    aspectRatio: `${imageDimensions.width} / ${imageDimensions.height}`,
+    maxWidth: `${aspectRatio * 72}dvh`,
+  };
+
+  const analyzeButtonText =
+    phase === "preparing"
+      ? "Preparing photo..."
+      : phase === "analyzing"
+        ? "Analyzing..."
+        : phase === "error"
+          ? "Try again"
+          : capturedImage
+            ? "Analyze photo"
+            : "Analyze frame";
 
   return (
     <section className="grid gap-5">
       <div className="overflow-hidden rounded-lg border border-stone-700/70 bg-black shadow-2xl shadow-black/35">
-        <div className="relative aspect-[3/4] max-h-[72dvh] min-h-[420px] w-full sm:aspect-video sm:min-h-0">
-          {uploadedImage ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={uploadedImage} alt="Uploaded object frame" className="h-full w-full object-cover" />
-          ) : (
+        {capturedImage ? (
+          <div className="flex w-full justify-center bg-black">
+            <div className="relative w-full overflow-hidden" style={capturedImageStyle}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={capturedImage}
+                alt="Captured frame being analyzed"
+                className="absolute inset-0 h-full w-full object-contain"
+              />
+
+              {phase === "complete"
+                ? analysis.objects.map((object, index) => {
+                    if (!object.marker) return null;
+                    const itemNumber = index + 1;
+
+                    return (
+                      <button
+                        key={`${object.object_name}-${itemNumber}`}
+                        type="button"
+                        onClick={() => handleMarkerClick(itemNumber)}
+                        aria-label={`View item ${itemNumber}: ${object.object_name}`}
+                        title={object.object_name}
+                        className="absolute grid h-8 w-8 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border-2 border-stone-950 bg-amber-300 text-sm font-black text-stone-950 shadow-[0_2px_16px_rgba(0,0,0,0.75)] transition hover:scale-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-100"
+                        style={{ left: `${object.marker.x}%`, top: `${object.marker.y}%` }}
+                      >
+                        {itemNumber}
+                      </button>
+                    );
+                  })
+                : null}
+            </div>
+          </div>
+        ) : (
+          <div className="relative aspect-[3/4] max-h-[72dvh] min-h-[420px] w-full sm:aspect-video sm:min-h-0">
             <video
               ref={videoRef}
               className="h-full w-full object-cover"
@@ -163,58 +397,154 @@ export function CameraScanner() {
               muted
               autoPlay
             />
-          )}
 
-          {!cameraReady && !uploadedImage ? (
-            <div className="absolute inset-0 grid place-items-center bg-stone-950 text-center">
-              <div className="px-6">
-                <p className="text-sm font-semibold text-stone-200">Opening camera...</p>
-                <p className="mt-2 text-sm text-stone-500">
-                  Rear camera is preferred when your device supports it.
-                </p>
+            {!cameraReady && !cameraError && phase !== "preparing" ? (
+              <div className="absolute inset-0 grid place-items-center bg-stone-950 text-center">
+                <div className="px-6">
+                  <p className="text-sm font-semibold text-stone-200">Opening camera...</p>
+                  <p className="mt-2 text-sm text-stone-500">
+                    Rear camera is preferred when your device supports it.
+                  </p>
+                </div>
               </div>
-            </div>
-          ) : null}
-        </div>
+            ) : null}
+
+            {cameraError && phase !== "preparing" ? (
+              <div className="absolute inset-0 grid place-items-center bg-stone-950 text-center">
+                <p className="max-w-sm px-6 text-sm text-stone-400">Camera unavailable</p>
+              </div>
+            ) : null}
+
+            {phase === "preparing" ? (
+              <div className="absolute inset-0 grid place-items-center bg-stone-950/90 text-center">
+                <div className="px-6">
+                  <span className="mx-auto block h-7 w-7 animate-spin rounded-full border-2 border-stone-700 border-t-amber-300" />
+                  <p className="mt-3 text-sm font-semibold text-stone-200">Preparing photo...</p>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        )}
 
         <div className="border-t border-stone-800 bg-stone-950/94 p-4">
-          {cameraError ? (
+          {capturedImage ? (
+            <div
+              role="status"
+              aria-live="polite"
+              className="mb-3 rounded-md border border-stone-700 bg-stone-900/80 p-3"
+            >
+              {phase === "ready" ? (
+                <div className="flex items-center gap-2 text-sm font-semibold text-stone-100">
+                  <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
+                  Photo ready
+                </div>
+              ) : null}
+
+              {phase === "analyzing" ? (
+                <div className="grid gap-2">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-emerald-100">
+                    <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
+                    Photo captured
+                  </div>
+                  <div className="flex items-center gap-2 text-sm font-semibold text-stone-100">
+                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-stone-600 border-t-amber-300" />
+                    Analyzing objects...
+                  </div>
+                </div>
+              ) : null}
+
+              {phase === "complete" ? (
+                <div className="grid gap-1">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-emerald-100">
+                    <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
+                    Analysis complete
+                  </div>
+                  <p className="pl-[18px] text-sm text-stone-400">
+                    {itemCount} {itemLabel} found
+                  </p>
+                </div>
+              ) : null}
+
+              {phase === "error" ? (
+                <div className="grid gap-1">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-red-100">
+                    <span className="h-2.5 w-2.5 rounded-full bg-red-400" />
+                    Analysis failed
+                  </div>
+                  <p className="pl-[18px] text-sm text-stone-400">The captured photo is still available.</p>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          {cameraError && !capturedImage ? (
             <p className="mb-3 rounded-md border border-amber-300/25 bg-amber-300/10 p-3 text-sm text-amber-100">
               {cameraError}
             </p>
           ) : null}
 
-          <div className="flex flex-col gap-3 sm:flex-row">
-            <button
-              type="button"
-              onClick={handleAnalyzeFrame}
-              disabled={isAnalyzing || (!cameraReady && !uploadedImage)}
-              className="h-12 flex-1 rounded-md bg-amber-300 px-4 text-sm font-bold text-stone-950 transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:bg-stone-700 disabled:text-stone-400"
-            >
-              {isAnalyzing ? "Analyzing frame..." : "Analyze frame"}
-            </button>
+          {error ? (
+            <p role="alert" className="mb-3 rounded-md border border-red-400/25 bg-red-500/10 p-3 text-sm text-red-100">
+              {error}
+            </p>
+          ) : null}
 
-            <label className="flex h-12 cursor-pointer items-center justify-center rounded-md border border-stone-700 px-4 text-sm font-semibold text-stone-100 transition hover:border-stone-500 hover:bg-stone-900">
-              Upload photo
-              <input type="file" accept="image/*" className="sr-only" onChange={handleFileUpload} />
-            </label>
+          <div className="flex flex-col gap-3 sm:flex-row">
+            {phase !== "complete" ? (
+              <button
+                type="button"
+                onClick={handleAnalyzeFrame}
+                disabled={isBusy || !canAnalyze}
+                className={`flex h-12 flex-1 items-center justify-center gap-2 rounded-md px-4 text-sm font-bold text-stone-950 transition ${
+                  phase === "analyzing"
+                    ? "cursor-wait bg-amber-300/70"
+                    : "bg-amber-300 hover:bg-amber-200 disabled:cursor-not-allowed disabled:bg-stone-700 disabled:text-stone-400"
+                }`}
+              >
+                {phase === "analyzing" ? (
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-stone-700/40 border-t-stone-950" />
+                ) : null}
+                {analyzeButtonText}
+              </button>
+            ) : null}
+
+            {capturedImage ? (
+              <button
+                type="button"
+                onClick={handleBackToCamera}
+                className="h-12 flex-1 rounded-md border border-stone-700 px-4 text-sm font-semibold text-stone-100 transition hover:border-stone-500 hover:bg-stone-900"
+              >
+                Back to camera
+              </button>
+            ) : (
+              <label
+                className={`flex h-12 flex-1 cursor-pointer items-center justify-center rounded-md border border-stone-700 px-4 text-sm font-semibold text-stone-100 transition hover:border-stone-500 hover:bg-stone-900 ${
+                  phase === "preparing" ? "pointer-events-none opacity-50" : ""
+                }`}
+              >
+                Upload photo
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="sr-only"
+                  disabled={phase === "preparing"}
+                  onChange={handleFileUpload}
+                />
+              </label>
+            )}
           </div>
         </div>
       </div>
 
-      {error ? (
-        <div className="rounded-lg border border-red-400/25 bg-red-500/10 p-4 text-sm text-red-100">
-          {error}
-        </div>
-      ) : null}
-
-      {hasResults ? (
-        <div className="grid gap-4">
+      {phase === "complete" ? (
+        <div ref={resultsRef} tabIndex={-1} className="grid scroll-mt-4 gap-4 outline-none">
           <div className="rounded-lg border border-stone-700/70 bg-stone-950/58 p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">
               Scene summary
             </p>
-            <p className="mt-2 leading-6 text-stone-200">{analysis.scene_summary || "No summary returned."}</p>
+            <p className="mt-2 leading-6 text-stone-200">
+              {analysis.scene_summary || "No summary returned."}
+            </p>
             {analysis.warning ? (
               <p className="mt-3 rounded-md border border-amber-300/25 bg-amber-300/10 p-3 text-sm text-amber-100">
                 {analysis.warning}
@@ -222,16 +552,29 @@ export function CameraScanner() {
             ) : null}
           </div>
 
-          {analysis.objects.map((object, index) => (
-            <ObjectResultCard key={`${object.object_name}-${index}`} result={object} />
-          ))}
+          {analysis.objects.length > 0 ? (
+            analysis.objects.map((object, index) => (
+              <ObjectResultCard
+                key={`${object.object_name}-${index}`}
+                result={object}
+                itemNumber={index + 1}
+              />
+            ))
+          ) : (
+            <div className="rounded-lg border border-stone-700/70 bg-stone-950/58 p-4">
+              <p className="font-semibold text-stone-100">No interesting objects found</p>
+              <p className="mt-2 text-sm leading-6 text-stone-400">
+                Try another angle or move closer to maker marks, labels, or unusual details.
+              </p>
+            </div>
+          )}
         </div>
-      ) : (
+      ) : phase === "idle" && !error ? (
         <div className="rounded-lg border border-stone-700/70 bg-stone-950/45 p-4 text-sm leading-6 text-stone-400">
           Point the camera at furniture, books, tools, church objects, packaging, instruments, or anything with
           unusual markings, then analyze the frame.
         </div>
-      )}
+      ) : null}
 
       <canvas ref={canvasRef} className="hidden" />
     </section>
