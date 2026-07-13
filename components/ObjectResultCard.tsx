@@ -5,18 +5,24 @@ export type ObjectMarker = {
   y: number;
 };
 
+export type EurValueRange = {
+  min: number;
+  max: number;
+};
+
 export type ObjectResult = {
   object_name: string;
   likely_category: string;
   estimated_period: string;
   value_context: string;
   market_interest: "low" | "medium" | "high";
-  estimated_value_range: string | null;
+  estimated_value_eur: EurValueRange;
+  valuation_basis: "MODEL_ESTIMATE" | "BRAND_ESTIMATE" | "CATEGORY_ESTIMATE";
   candidate_status: "INTERESTING" | "NEEDS_CLOSEUP" | "IGNORE";
   pricing_confidence: "low" | "medium" | "high";
   worth_score: number;
   indicator_color: IndicatorColor;
-  confidence_score: number;
+  identification_confidence: number;
   what_to_photograph_next: string[];
   recommendation: "IGNORE" | "CHECK" | "SAVE" | "EXPERT";
   reasoning_summary: string;
@@ -49,6 +55,27 @@ const candidateStatusLabels: Record<ObjectResult["candidate_status"], string> = 
   IGNORE: "Low priority",
 };
 
+const valuationBasisLabels: Record<ObjectResult["valuation_basis"], string> = {
+  MODEL_ESTIMATE: "Model estimate",
+  BRAND_ESTIMATE: "Brand estimate",
+  CATEGORY_ESTIMATE: "Category estimate",
+};
+
+const eurNumberFormatter = new Intl.NumberFormat("en-IE", {
+  maximumFractionDigits: 0,
+});
+
+export function formatEurRange(range: EurValueRange): string {
+  const min = Math.max(0, Math.round(range.min));
+  const max = Math.max(min, Math.round(range.max));
+
+  if (min === max) {
+    return `EUR ${eurNumberFormatter.format(min)}`;
+  }
+
+  return `EUR ${eurNumberFormatter.format(min)}-${eurNumberFormatter.format(max)}`;
+}
+
 type ObjectResultCardProps = {
   result: ObjectResult;
   itemNumber: number;
@@ -68,64 +95,57 @@ export function ObjectResultCard({ result, itemNumber }: ObjectResultCardProps) 
           {itemNumber}
         </span>
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-start justify-between gap-2">
-            <div>
-              <h2 className="text-lg font-semibold leading-6 text-stone-50">
-                {result.object_name}
-              </h2>
-              <p className="mt-1 text-sm text-stone-400">
-                {result.likely_category} / {result.estimated_period || "unknown period"}
-              </p>
-            </div>
-            <div className="rounded-md border border-amber-200/20 bg-amber-200/10 px-2.5 py-1 text-sm font-semibold text-amber-100">
-              {Math.round(result.worth_score)}/100
-            </div>
+          <h2 className="text-lg font-semibold leading-6 text-stone-50">
+            {result.object_name}
+          </h2>
+          <p className="mt-2 text-2xl font-semibold text-amber-100">
+            {formatEurRange(result.estimated_value_eur)}
+          </p>
+
+          <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+            <span
+              className={`rounded-md border px-2.5 py-1 text-xs font-bold tracking-[0.14em] ${recommendationClasses[result.recommendation]}`}
+            >
+              {result.recommendation}
+            </span>
+            <span className="text-xs text-stone-400">
+              Identification {Math.round(result.identification_confidence)}/100
+            </span>
+            <span className="text-xs text-stone-400">
+              Pricing confidence {result.pricing_confidence}
+            </span>
           </div>
 
-          <div className="mt-4 grid gap-3 text-sm text-stone-300">
-            <div>
+          <p className="mt-3 text-sm text-stone-400">
+            {result.likely_category} / {result.estimated_period || "unknown period"}
+          </p>
+
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span className="rounded-md border border-stone-700 bg-stone-900 px-2.5 py-1 text-xs text-stone-300">
+              {valuationBasisLabels[result.valuation_basis]}
+            </span>
+            <span
+              className={`rounded-md border px-2.5 py-1 text-xs font-semibold ${candidateStatusClasses[result.candidate_status]}`}
+            >
+              {candidateStatusLabels[result.candidate_status]}
+            </span>
+            <span className="text-xs text-stone-500">
+              Radar score {Math.round(result.worth_score)}/100
+            </span>
+          </div>
+
+          <p className="mt-4 text-sm leading-5 text-stone-300">{result.reasoning_summary}</p>
+
+          {result.what_to_photograph_next.length > 0 ? (
+            <div className="mt-4 border-t border-stone-800 pt-3">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">
-                Value range
+                Optional next photo
               </p>
-              <p className="mt-1 text-stone-100">
-                {result.estimated_value_range || "Needs a closer photo before pricing."}
+              <p className="mt-2 text-sm leading-5 text-stone-300">
+                {result.what_to_photograph_next[0]}
               </p>
             </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <span
-                className={`rounded-md border px-2.5 py-1 text-xs font-bold ${candidateStatusClasses[result.candidate_status]}`}
-              >
-                {candidateStatusLabels[result.candidate_status]}
-              </span>
-              <span
-                className={`rounded-md border px-2.5 py-1 text-xs font-bold tracking-[0.14em] ${recommendationClasses[result.recommendation]}`}
-              >
-                {result.recommendation}
-              </span>
-              <span className="text-xs text-stone-500">
-                Identification {Math.round(result.confidence_score)}/100
-              </span>
-              <span className="text-xs text-stone-500">
-                Price confidence {result.pricing_confidence}
-              </span>
-            </div>
-
-            <p className="leading-5 text-stone-300">{result.reasoning_summary}</p>
-
-            {result.what_to_photograph_next.length > 0 ? (
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">
-                  Photograph next
-                </p>
-                <ul className="mt-2 list-disc space-y-1 pl-5 text-stone-300">
-                  {result.what_to_photograph_next.map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-          </div>
+          ) : null}
         </div>
       </div>
     </article>

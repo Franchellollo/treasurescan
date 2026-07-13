@@ -51,9 +51,11 @@ Included:
 - Client-side image resizing and server-side image size validation
 - Next.js API route for analysis
 - OpenAI Vision discovery scan with strict structured JSON and up to five candidates
+- Provisional EUR ranges based on visible model, brand, or category details
+- Server-calculated visible scene value total with duplicate-result protection
 - Candidate states for interesting, needs-close-up, and low-priority objects
 - Separate identification and pricing confidence
-- Result cards with indicator color, score, period, cautious value range, recommendation, and next photo suggestions
+- Result cards with value first, recommendation, confidence, score, period, and optional next-photo guidance
 
 Not included yet:
 

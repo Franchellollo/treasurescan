@@ -2,12 +2,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
-import { ObjectResultCard } from "./ObjectResultCard";
-import type { ObjectResult } from "./ObjectResultCard";
+import { formatEurRange, ObjectResultCard } from "./ObjectResultCard";
+import type { EurValueRange, ObjectResult } from "./ObjectResultCard";
 
 type AnalyzeResponse = {
   scene_summary: string;
   objects: ObjectResult[];
+  total_estimated_value_eur: EurValueRange;
   warning: string;
 };
 
@@ -22,6 +23,7 @@ type PreparedImage = {
 const emptyResponse: AnalyzeResponse = {
   scene_summary: "",
   objects: [],
+  total_estimated_value_eur: { min: 0, max: 0 },
   warning: "",
 };
 
@@ -30,6 +32,21 @@ const MAX_IMAGE_DIMENSION = 1600;
 const MAX_IMAGE_DATA_URL_LENGTH = 4_000_000;
 const JPEG_QUALITY = 0.82;
 const ANALYSIS_TIMEOUT_MS = 45_000;
+
+function parseEurRange(value: unknown): EurValueRange {
+  if (!value || typeof value !== "object") return { min: 0, max: 0 };
+
+  const min = Number((value as { min?: unknown }).min);
+  const max = Number((value as { max?: unknown }).max);
+  if (!Number.isFinite(min) || !Number.isFinite(max) || min < 0 || max < 0) {
+    return { min: 0, max: 0 };
+  }
+
+  return {
+    min: Math.round(Math.min(min, max)),
+    max: Math.round(Math.max(min, max)),
+  };
+}
 
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -232,6 +249,7 @@ export function CameraScanner() {
       setAnalysis({
         scene_summary: typeof result.scene_summary === "string" ? result.scene_summary : "",
         objects: Array.isArray(result.objects) ? result.objects : [],
+        total_estimated_value_eur: parseEurRange(result.total_estimated_value_eur),
         warning: typeof result.warning === "string" ? result.warning : "",
       });
       setPhase("complete");
@@ -540,7 +558,24 @@ export function CameraScanner() {
       {phase === "complete" ? (
         <div ref={resultsRef} tabIndex={-1} className="grid scroll-mt-4 gap-4 outline-none">
           <div className="rounded-lg border border-stone-700/70 bg-stone-950/58 p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">
+            {analysis.objects.length > 0 ? (
+              <div className="border-b border-stone-800 pb-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">
+                  Estimated visible resale value
+                </p>
+                <p className="mt-2 text-2xl font-semibold text-amber-100">
+                  {formatEurRange(analysis.total_estimated_value_eur)}
+                </p>
+                <p className="mt-1 text-xs leading-5 text-stone-500">
+                  Provisional total for {itemCount} unique {itemLabel}. Not a professional appraisal.
+                </p>
+              </div>
+            ) : null}
+            <p
+              className={`text-xs font-semibold uppercase tracking-[0.18em] text-stone-500 ${
+                analysis.objects.length > 0 ? "mt-4" : ""
+              }`}
+            >
               Scene summary
             </p>
             <p className="mt-2 leading-6 text-stone-200">
