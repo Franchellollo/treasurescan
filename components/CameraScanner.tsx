@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
-import { ObjectResult, ObjectResultCard } from "./ObjectResultCard";
+import { ObjectResultCard } from "./ObjectResultCard";
+import type { ObjectResult } from "./ObjectResultCard";
 
 type AnalyzeResponse = {
   scene_summary: string;
@@ -562,17 +563,18 @@ export function CameraScanner() {
             ))
           ) : (
             <div className="rounded-lg border border-stone-700/70 bg-stone-950/58 p-4">
-              <p className="font-semibold text-stone-100">No interesting objects found</p>
+              <p className="font-semibold text-stone-100">No strong candidates identified</p>
               <p className="mt-2 text-sm leading-6 text-stone-400">
-                Try another angle or move closer to maker marks, labels, or unusual details.
+                No strong candidates identified from this distance. Move closer to labels, model numbers,
+                signatures or unusual details.
               </p>
             </div>
           )}
         </div>
       ) : phase === "idle" && !error ? (
         <div className="rounded-lg border border-stone-700/70 bg-stone-950/45 p-4 text-sm leading-6 text-stone-400">
-          Point the camera at furniture, books, tools, church objects, packaging, instruments, or anything with
-          unusual markings, then analyze the frame.
+          Point the camera at electronics, tools, branded goods, furniture, art, books, historical objects, or
+          anything with unusual labels, materials, or design, then analyze the frame.
         </div>
       ) : null}
 

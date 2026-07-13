@@ -9,9 +9,11 @@ export type ObjectResult = {
   object_name: string;
   likely_category: string;
   estimated_period: string;
-  historical_context: string;
-  collector_interest: "low" | "medium" | "high";
-  estimated_value_range: string;
+  value_context: string;
+  market_interest: "low" | "medium" | "high";
+  estimated_value_range: string | null;
+  candidate_status: "INTERESTING" | "NEEDS_CLOSEUP" | "IGNORE";
+  pricing_confidence: "low" | "medium" | "high";
   worth_score: number;
   indicator_color: IndicatorColor;
   confidence_score: number;
@@ -33,6 +35,18 @@ const recommendationClasses: Record<ObjectResult["recommendation"], string> = {
   CHECK: "border-yellow-300/25 bg-yellow-300/10 text-yellow-100",
   SAVE: "border-emerald-300/25 bg-emerald-300/10 text-emerald-100",
   EXPERT: "border-emerald-300/25 bg-emerald-300/10 text-emerald-100",
+};
+
+const candidateStatusClasses: Record<ObjectResult["candidate_status"], string> = {
+  INTERESTING: "border-emerald-300/25 bg-emerald-300/10 text-emerald-100",
+  NEEDS_CLOSEUP: "border-yellow-300/25 bg-yellow-300/10 text-yellow-100",
+  IGNORE: "border-red-400/25 bg-red-500/10 text-red-100",
+};
+
+const candidateStatusLabels: Record<ObjectResult["candidate_status"], string> = {
+  INTERESTING: "Interesting",
+  NEEDS_CLOSEUP: "Needs close-up",
+  IGNORE: "Low priority",
 };
 
 type ObjectResultCardProps = {
@@ -60,7 +74,7 @@ export function ObjectResultCard({ result, itemNumber }: ObjectResultCardProps) 
                 {result.object_name}
               </h2>
               <p className="mt-1 text-sm text-stone-400">
-                {result.likely_category} · {result.estimated_period || "unknown period"}
+                {result.likely_category} / {result.estimated_period || "unknown period"}
               </p>
             </div>
             <div className="rounded-md border border-amber-200/20 bg-amber-200/10 px-2.5 py-1 text-sm font-semibold text-amber-100">
@@ -73,17 +87,27 @@ export function ObjectResultCard({ result, itemNumber }: ObjectResultCardProps) 
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">
                 Value range
               </p>
-              <p className="mt-1 text-stone-100">{result.estimated_value_range}</p>
+              <p className="mt-1 text-stone-100">
+                {result.estimated_value_range || "Needs a closer photo before pricing."}
+              </p>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
+              <span
+                className={`rounded-md border px-2.5 py-1 text-xs font-bold ${candidateStatusClasses[result.candidate_status]}`}
+              >
+                {candidateStatusLabels[result.candidate_status]}
+              </span>
               <span
                 className={`rounded-md border px-2.5 py-1 text-xs font-bold tracking-[0.14em] ${recommendationClasses[result.recommendation]}`}
               >
                 {result.recommendation}
               </span>
               <span className="text-xs text-stone-500">
-                Confidence {Math.round(result.confidence_score)}/100
+                Identification {Math.round(result.confidence_score)}/100
+              </span>
+              <span className="text-xs text-stone-500">
+                Price confidence {result.pricing_confidence}
               </span>
             </div>
 

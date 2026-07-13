@@ -1,8 +1,8 @@
 # TreasureScan
 
-TreasureScan is a mobile-first AI value radar for thrift stores, attics, church restorations, flea markets, and old-object hunting.
+TreasureScan is a mobile-first AI discovery radar for thrift stores, attics, church restorations, flea markets, workshops, and object hunting.
 
-The MVP opens the camera when possible, captures the current frame, sends it to a Next.js API route, and asks OpenAI Vision for cautious structured JSON about visible objects and potential value signals.
+The MVP opens the camera when possible, captures the current frame, sends it to a Next.js API route, and asks OpenAI Vision for cautious structured JSON about visible objects and potential value signals. It considers both historical and modern objects that may have resale, collectible, parts, brand, model, design, or material interest.
 
 ## Install
 
@@ -50,8 +50,10 @@ Included:
 - Numbered approximate object markers linked to result cards
 - Client-side image resizing and server-side image size validation
 - Next.js API route for analysis
-- OpenAI Vision request with structured JSON
-- Result cards with indicator color, score, period, value range, recommendation, and next photo suggestions
+- OpenAI Vision discovery scan with strict structured JSON and up to five candidates
+- Candidate states for interesting, needs-close-up, and low-priority objects
+- Separate identification and pricing confidence
+- Result cards with indicator color, score, period, cautious value range, recommendation, and next photo suggestions
 
 Not included yet:
 

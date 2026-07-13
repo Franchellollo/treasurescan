@@ -12,7 +12,7 @@ export default function Home() {
             TreasureScan
           </h1>
           <p className="mt-2 max-w-xl text-base leading-6 text-stone-300">
-            AI value radar before throwing history away.
+            AI value radar for objects worth a second look.
           </p>
         </header>
 

@@ -6,29 +6,36 @@ export type AnalyzeFrameResult = {
   warning: string;
 };
 
-const visionPrompt = `Analyze this camera frame as an expert assistant for identifying potentially valuable old objects in thrift stores, attics, flea markets, church restorations, and demolition/restoration sites.
+const visionPrompt = `Analyze this camera frame as a discovery scan for objects that may deserve closer inspection in thrift stores, attics, flea markets, church restorations, workshops, and demolition or restoration sites.
 
-Your job is not to be certain. Your job is to help the user decide what deserves attention.
+Your job is not to prove that an object is valuable. Your job is to identify up to five of the best visible candidates for a closer look.
 
-Look for:
-- antiques
-- religious/church objects
-- old furniture
-- vintage electronics
-- musical instruments
-- old books/papers
-- collectible packaging
-- military markings
-- maker marks
-- unusual craftsmanship
-- historical signs
+An object may deserve attention because of:
+- resale value
+- collectible or historical value
+- useful parts value
+- a visible brand, model, maker mark, signature, or label
+- unusual design, craftsmanship, material, or construction
 
-Do not overstate certainty.
-Be cautious with value estimates.
-If the image is unclear, say what should be photographed next.
-For every object, place one approximate marker at the visual center of that object.
+Consider both modern and older objects, including electronics, audio equipment, cameras, tools, watches, jewelry, ceramics, glassware, art, toys, games, musical equipment, branded goods, furniture, books, papers, packaging, religious or church objects, military or historical objects, and architectural salvage.
+
+Do not require an object to be antique, vintage, rare, old, or collectible. Do not force those descriptions when they are not supported by visible evidence.
+For wide scenes, select the five strongest candidates rather than trying to identify everything.
+Never invent a brand, model, age, material, authenticity claim, or price detail that cannot be seen.
+
+Candidate status rules:
+- INTERESTING: visible details give a concrete reason to inspect, research, save, or seek an expert.
+- NEEDS_CLOSEUP: the object may have value, but a label, model number, signature, condition detail, connector, material, or maker mark is unreadable. Prefer this over IGNORE when value is plausible but identification is incomplete.
+- IGNORE: the object is identifiable and there is no meaningful reason for closer inspection. Do not use IGNORE merely because an object is modern.
+
+When details are insufficient, keep the object as a candidate, use NEEDS_CLOSEUP, set pricing confidence to low, use a broad generic value range or null, and request a specific close-up photo.
+Confidence score means identification confidence. Pricing confidence separately describes how reliable the price estimate is.
+Be cautious with value estimates and do not claim an object is valuable when its brand or model is unreadable.
+Return an empty objects array only when there are genuinely no identifiable objects worth closer inspection. Do not pad the list with ordinary objects.
+
+For every returned object, place one approximate marker at the visual center of that object.
 Marker x and y must be percentages from 0 to 100, measured from the image's top-left corner.
-Only include objects that can be located clearly in the image.
+Only include objects that can be located clearly enough to place a marker.
 Return only valid JSON.`;
 
 const responseSchema = {
@@ -45,9 +52,14 @@ const responseSchema = {
           object_name: { type: "string" },
           likely_category: { type: "string" },
           estimated_period: { type: "string" },
-          historical_context: { type: "string" },
-          collector_interest: { type: "string", enum: ["low", "medium", "high"] },
-          estimated_value_range: { type: "string" },
+          value_context: { type: "string" },
+          market_interest: { type: "string", enum: ["low", "medium", "high"] },
+          estimated_value_range: { type: ["string", "null"] },
+          candidate_status: {
+            type: "string",
+            enum: ["INTERESTING", "NEEDS_CLOSEUP", "IGNORE"],
+          },
+          pricing_confidence: { type: "string", enum: ["low", "medium", "high"] },
           worth_score: { type: "number", minimum: 0, maximum: 100 },
           indicator_color: { type: "string", enum: ["green", "yellow", "orange", "red"] },
           confidence_score: { type: "number", minimum: 0, maximum: 100 },
@@ -71,9 +83,11 @@ const responseSchema = {
           "object_name",
           "likely_category",
           "estimated_period",
-          "historical_context",
-          "collector_interest",
+          "value_context",
+          "market_interest",
           "estimated_value_range",
+          "candidate_status",
+          "pricing_confidence",
           "worth_score",
           "indicator_color",
           "confidence_score",
@@ -114,7 +128,17 @@ function extractResponseText(payload: unknown): string {
 }
 
 function normalizeByScore(object: ObjectResult): ObjectResult {
-  const worthScore = Math.max(0, Math.min(100, Number(object.worth_score) || 0));
+  const candidateStatus: ObjectResult["candidate_status"] =
+    object.candidate_status === "INTERESTING" ||
+    object.candidate_status === "NEEDS_CLOSEUP" ||
+    object.candidate_status === "IGNORE"
+      ? object.candidate_status
+      : "NEEDS_CLOSEUP";
+  let pricingConfidence: ObjectResult["pricing_confidence"] =
+    object.pricing_confidence === "medium" || object.pricing_confidence === "high"
+      ? object.pricing_confidence
+      : "low";
+  let worthScore = Math.max(0, Math.min(100, Number(object.worth_score) || 0));
   const confidenceScore = Math.max(0, Math.min(100, Number(object.confidence_score) || 0));
   const markerX = Number(object.marker?.x);
   const markerY = Number(object.marker?.y);
@@ -129,7 +153,20 @@ function normalizeByScore(object: ObjectResult): ObjectResult {
   let indicator_color: ObjectResult["indicator_color"] = "red";
   let recommendation: ObjectResult["recommendation"] = "IGNORE";
 
-  if (worthScore >= 80) {
+  if (candidateStatus === "IGNORE") {
+    worthScore = Math.min(worthScore, 24);
+    pricingConfidence = "low";
+  } else if (candidateStatus === "NEEDS_CLOSEUP") {
+    worthScore = Math.max(25, Math.min(worthScore, 79));
+    pricingConfidence = "low";
+  } else {
+    worthScore = Math.max(25, worthScore);
+  }
+
+  if (candidateStatus === "IGNORE") {
+    indicator_color = "red";
+    recommendation = "IGNORE";
+  } else if (worthScore >= 80) {
     indicator_color = "green";
     recommendation = object.recommendation === "EXPERT" ? "EXPERT" : "SAVE";
   } else if (worthScore >= 50) {
@@ -137,11 +174,17 @@ function normalizeByScore(object: ObjectResult): ObjectResult {
     recommendation = "CHECK";
   } else if (worthScore >= 25) {
     indicator_color = "orange";
-    recommendation = object.recommendation === "IGNORE" ? "IGNORE" : "CHECK";
+    recommendation = "CHECK";
   }
 
   return {
     ...object,
+    candidate_status: candidateStatus,
+    pricing_confidence: pricingConfidence,
+    estimated_value_range:
+      typeof object.estimated_value_range === "string" && object.estimated_value_range.trim()
+        ? object.estimated_value_range.trim()
+        : null,
     worth_score: worthScore,
     confidence_score: confidenceScore,
     indicator_color,
@@ -212,7 +255,9 @@ export async function analyzeFrameWithOpenAI(imageBase64: string): Promise<Analy
 
   return {
     scene_summary: parsed.scene_summary || "",
-    objects: Array.isArray(parsed.objects) ? parsed.objects.map(normalizeByScore) : [],
+    objects: Array.isArray(parsed.objects)
+      ? parsed.objects.slice(0, 5).map(normalizeByScore)
+      : [],
     warning: parsed.warning || "",
   };
 }
