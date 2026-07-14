@@ -5,6 +5,13 @@ export type ObjectMarker = {
   y: number;
 };
 
+export type ObjectBox = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
 export type EurValueRange = {
   min: number;
   max: number;
@@ -27,6 +34,7 @@ export type ObjectResult = {
   recommendation: "IGNORE" | "CHECK" | "SAVE" | "EXPERT";
   reasoning_summary: string;
   marker: ObjectMarker | null;
+  box: ObjectBox | null;
 };
 
 const colorClasses: Record<IndicatorColor, string> = {
@@ -79,13 +87,14 @@ export function formatEurRange(range: EurValueRange): string {
 type ObjectResultCardProps = {
   result: ObjectResult;
   itemNumber: number;
+  onAnalyzeFurther: () => void;
 };
 
-export function ObjectResultCard({ result, itemNumber }: ObjectResultCardProps) {
+export function ObjectResultCard({ result, itemNumber, onAnalyzeFurther }: ObjectResultCardProps) {
   return (
     <article
       id={`treasure-result-${itemNumber}`}
-      className="scroll-mt-4 rounded-lg border border-stone-700/70 bg-stone-950/68 p-4 shadow-xl shadow-black/20 backdrop-blur"
+      className="scroll-mt-[calc(24dvh+5rem)] rounded-lg border border-stone-700/70 bg-stone-950/68 p-4 shadow-xl shadow-black/20 backdrop-blur"
     >
       <div className="flex items-start gap-3">
         <span
@@ -146,6 +155,14 @@ export function ObjectResultCard({ result, itemNumber }: ObjectResultCardProps) 
               </p>
             </div>
           ) : null}
+
+          <button
+            type="button"
+            onClick={onAnalyzeFurther}
+            className="mt-4 h-11 w-full rounded-md border border-amber-300/35 bg-amber-300/10 px-4 text-sm font-bold text-amber-100 transition hover:border-amber-200/60 hover:bg-amber-300/15"
+          >
+            Analyze further
+          </button>
         </div>
       </div>
     </article>

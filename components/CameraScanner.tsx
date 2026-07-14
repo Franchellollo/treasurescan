@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
+import { cropImageToJpeg, prepareUploadedImage, renderImageToJpeg } from "@/lib/client-image";
+import { ItemDeepDive } from "./ItemDeepDive";
 import { formatEurRange, ObjectResultCard } from "./ObjectResultCard";
 import type { EurValueRange, ObjectResult } from "./ObjectResultCard";
 
@@ -14,10 +16,11 @@ type AnalyzeResponse = {
 
 type ScanPhase = "idle" | "preparing" | "ready" | "analyzing" | "complete" | "error";
 
-type PreparedImage = {
-  dataUrl: string;
-  width: number;
-  height: number;
+type SelectedItem = {
+  item: ObjectResult;
+  itemNumber: number;
+  image: string;
+  imageLabel: string;
 };
 
 const emptyResponse: AnalyzeResponse = {
@@ -27,10 +30,6 @@ const emptyResponse: AnalyzeResponse = {
   warning: "",
 };
 
-const MAX_SOURCE_FILE_BYTES = 15 * 1024 * 1024;
-const MAX_IMAGE_DIMENSION = 1600;
-const MAX_IMAGE_DATA_URL_LENGTH = 4_000_000;
-const JPEG_QUALITY = 0.82;
 const ANALYSIS_TIMEOUT_MS = 45_000;
 
 function parseEurRange(value: unknown): EurValueRange {
@@ -48,96 +47,23 @@ function parseEurRange(value: unknown): EurValueRange {
   };
 }
 
-function readFileAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === "string") {
-        resolve(reader.result);
-      } else {
-        reject(new Error("Could not read this photo."));
-      }
-    };
-    reader.onerror = () => reject(new Error("Could not read this photo."));
-    reader.readAsDataURL(file);
-  });
-}
-
-function loadImage(source: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error("This image format is not supported by your browser."));
-    image.src = source;
-  });
-}
-
-function renderImageToJpeg(
-  source: CanvasImageSource,
-  sourceWidth: number,
-  sourceHeight: number,
-  canvas: HTMLCanvasElement,
-): PreparedImage {
-  const scale = Math.min(1, MAX_IMAGE_DIMENSION / Math.max(sourceWidth, sourceHeight));
-  const width = Math.max(1, Math.round(sourceWidth * scale));
-  const height = Math.max(1, Math.round(sourceHeight * scale));
-
-  canvas.width = width;
-  canvas.height = height;
-
-  const context = canvas.getContext("2d");
-  if (!context) {
-    throw new Error("Could not prepare the image for analysis.");
-  }
-
-  context.fillStyle = "#0c0a09";
-  context.fillRect(0, 0, width, height);
-  context.drawImage(source, 0, 0, width, height);
-
-  const dataUrl = canvas.toDataURL("image/jpeg", JPEG_QUALITY);
-  if (dataUrl.length > MAX_IMAGE_DATA_URL_LENGTH) {
-    throw new Error("This photo is still too large after resizing. Try a smaller image.");
-  }
-
-  return { dataUrl, width, height };
-}
-
-async function prepareUploadedImage(file: File): Promise<PreparedImage> {
-  if (file.type && !file.type.startsWith("image/")) {
-    throw new Error("Choose an image file.");
-  }
-
-  if (file.size > MAX_SOURCE_FILE_BYTES) {
-    throw new Error("Photo is too large. Choose an image smaller than 15 MB.");
-  }
-
-  const source = await readFileAsDataUrl(file);
-  const image = await loadImage(source);
-
-  if (!image.naturalWidth || !image.naturalHeight) {
-    throw new Error("Could not determine the photo size.");
-  }
-
-  return renderImageToJpeg(
-    image,
-    image.naturalWidth,
-    image.naturalHeight,
-    document.createElement("canvas"),
-  );
-}
-
 export function CameraScanner() {
+  const scannerSectionRef = useRef<HTMLElement | null>(null);
+  const capturedFrameRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const analysisAbortRef = useRef<AbortController | null>(null);
   const resultsRef = useRef<HTMLDivElement | null>(null);
+  const deepDiveRef = useRef<HTMLDivElement | null>(null);
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraError, setCameraError] = useState("");
   const [capturedImage, setCapturedImage] = useState("");
   const [imageDimensions, setImageDimensions] = useState({ width: 4, height: 3 });
   const [phase, setPhase] = useState<ScanPhase>("idle");
   const [analysis, setAnalysis] = useState<AnalyzeResponse>(emptyResponse);
+  const [selectedItem, setSelectedItem] = useState<SelectedItem | null>(null);
+  const [isStickyCompact, setIsStickyCompact] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -201,12 +127,75 @@ export function CameraScanner() {
     if (phase !== "complete") return;
 
     const frame = window.requestAnimationFrame(() => {
-      resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      const section = scannerSectionRef.current;
+      if (!section) return;
+
+      const sectionTop = section.getBoundingClientRect().top + window.scrollY;
+      const transitionDistance = Math.min(220, window.innerHeight * 0.28);
+      const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+      window.scrollTo({
+        top: sectionTop + transitionDistance,
+        behavior: reduceMotion ? "auto" : "smooth",
+      });
       resultsRef.current?.focus({ preventScroll: true });
     });
 
     return () => window.cancelAnimationFrame(frame);
   }, [phase]);
+
+  useEffect(() => {
+    if (phase !== "complete") return;
+
+    let animationFrame = 0;
+    const aspectRatio = imageDimensions.width / imageDimensions.height;
+
+    const updateScrollProgress = () => {
+      animationFrame = 0;
+      const section = scannerSectionRef.current;
+      const capturedFrame = capturedFrameRef.current;
+      if (!section || !capturedFrame) return;
+
+      const progress = Math.max(
+        0,
+        Math.min(1, (8 - section.getBoundingClientRect().top) / 240),
+      );
+      const frameHeight = 72 - progress * 48;
+      capturedFrame.style.setProperty(
+        "--scan-frame-max-width",
+        `${aspectRatio * frameHeight}dvh`,
+      );
+      setIsStickyCompact((current) => {
+        const next = progress >= 0.7;
+        return current === next ? current : next;
+      });
+    };
+
+    const scheduleUpdate = () => {
+      if (animationFrame) return;
+      animationFrame = window.requestAnimationFrame(updateScrollProgress);
+    };
+
+    updateScrollProgress();
+    window.addEventListener("scroll", scheduleUpdate, { passive: true });
+    window.addEventListener("resize", scheduleUpdate);
+
+    return () => {
+      window.removeEventListener("scroll", scheduleUpdate);
+      window.removeEventListener("resize", scheduleUpdate);
+      if (animationFrame) window.cancelAnimationFrame(animationFrame);
+    };
+  }, [phase, imageDimensions.height, imageDimensions.width]);
+
+  useEffect(() => {
+    if (!selectedItem) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      deepDiveRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [selectedItem]);
 
   async function analyzeImage(imageBase64: string) {
     analysisAbortRef.current?.abort();
@@ -217,6 +206,8 @@ export function CameraScanner() {
     setPhase("analyzing");
     setError("");
     setAnalysis(emptyResponse);
+    setSelectedItem(null);
+    setIsStickyCompact(false);
 
     const timeout = window.setTimeout(() => {
       timedOut = true;
@@ -319,6 +310,8 @@ export function CameraScanner() {
     analysisAbortRef.current = null;
     setCapturedImage("");
     setAnalysis(emptyResponse);
+    setSelectedItem(null);
+    setIsStickyCompact(false);
     setError("");
     setPhase("preparing");
 
@@ -341,6 +334,8 @@ export function CameraScanner() {
     setCapturedImage("");
     setImageDimensions({ width: 4, height: 3 });
     setAnalysis(emptyResponse);
+    setSelectedItem(null);
+    setIsStickyCompact(false);
     setError("");
     setPhase("idle");
   }
@@ -351,6 +346,32 @@ export function CameraScanner() {
       ?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
+  async function handleAnalyzeFurther(item: ObjectResult, itemNumber: number) {
+    let image = capturedImage;
+    let imageLabel = "Full scan frame";
+
+    if (capturedImage && item.box) {
+      try {
+        const crop = await cropImageToJpeg(capturedImage, item.box);
+        image = crop.dataUrl;
+        imageLabel = "Automatic scan crop";
+      } catch {
+        image = capturedImage;
+      }
+    }
+
+    setSelectedItem({ item, itemNumber, image, imageLabel });
+  }
+
+  function handleCloseDeepDive() {
+    const itemNumber = selectedItem?.itemNumber;
+    setSelectedItem(null);
+
+    if (itemNumber) {
+      window.requestAnimationFrame(() => handleMarkerClick(itemNumber));
+    }
+  }
+
   const isBusy = phase === "preparing" || phase === "analyzing";
   const canAnalyze = Boolean(capturedImage) || cameraReady;
   const itemCount = analysis.objects.length;
@@ -358,7 +379,7 @@ export function CameraScanner() {
   const aspectRatio = imageDimensions.width / imageDimensions.height;
   const capturedImageStyle = {
     aspectRatio: `${imageDimensions.width} / ${imageDimensions.height}`,
-    maxWidth: `${aspectRatio * 72}dvh`,
+    maxWidth: `var(--scan-frame-max-width, ${aspectRatio * 72}dvh)`,
   };
 
   const analyzeButtonText =
@@ -373,17 +394,38 @@ export function CameraScanner() {
             : "Analyze frame";
 
   return (
-    <section className="grid gap-5">
-      <div className="overflow-hidden rounded-lg border border-stone-700/70 bg-black shadow-2xl shadow-black/35">
+    <section ref={scannerSectionRef} className="grid gap-5">
+      <div
+        className={`self-start overflow-hidden rounded-lg border border-stone-700/70 bg-black shadow-2xl shadow-black/35 ${
+          phase === "complete" ? "sticky top-2 z-20" : ""
+        }`}
+      >
         {capturedImage ? (
           <div className="flex w-full justify-center bg-black">
-            <div className="relative w-full overflow-hidden" style={capturedImageStyle}>
+            <div
+              ref={capturedFrameRef}
+              className="relative w-full overflow-hidden transition-[max-width] duration-75 ease-linear motion-reduce:transition-none"
+              style={capturedImageStyle}
+            >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={capturedImage}
                 alt="Captured frame being analyzed"
                 className="absolute inset-0 h-full w-full object-contain"
               />
+
+              {phase === "complete" && selectedItem?.item.box ? (
+                <span
+                  aria-hidden="true"
+                  className="pointer-events-none absolute border-2 border-amber-300 shadow-[0_0_0_1px_rgba(12,10,9,0.9)]"
+                  style={{
+                    left: `${selectedItem.item.box.x}%`,
+                    top: `${selectedItem.item.box.y}%`,
+                    width: `${selectedItem.item.box.width}%`,
+                    height: `${selectedItem.item.box.height}%`,
+                  }}
+                />
+              ) : null}
 
               {phase === "complete"
                 ? analysis.objects.map((object, index) => {
@@ -445,12 +487,18 @@ export function CameraScanner() {
           </div>
         )}
 
-        <div className="border-t border-stone-800 bg-stone-950/94 p-4">
+        <div
+          className={`border-t border-stone-800 bg-stone-950/94 transition-[padding] ${
+            phase === "complete" && isStickyCompact ? "p-2" : "p-4"
+          }`}
+        >
           {capturedImage ? (
             <div
               role="status"
               aria-live="polite"
-              className="mb-3 rounded-md border border-stone-700 bg-stone-900/80 p-3"
+              className={`mb-3 rounded-md border border-stone-700 bg-stone-900/80 p-3 ${
+                phase === "complete" && isStickyCompact ? "hidden" : ""
+              }`}
             >
               {phase === "ready" ? (
                 <div className="flex items-center gap-2 text-sm font-semibold text-stone-100">
@@ -531,7 +579,9 @@ export function CameraScanner() {
               <button
                 type="button"
                 onClick={handleBackToCamera}
-                className="h-12 flex-1 rounded-md border border-stone-700 px-4 text-sm font-semibold text-stone-100 transition hover:border-stone-500 hover:bg-stone-900"
+                className={`flex-1 rounded-md border border-stone-700 px-4 text-sm font-semibold text-stone-100 transition hover:border-stone-500 hover:bg-stone-900 ${
+                  phase === "complete" && isStickyCompact ? "h-10" : "h-12"
+                }`}
               >
                 Back to camera
               </button>
@@ -556,7 +606,11 @@ export function CameraScanner() {
       </div>
 
       {phase === "complete" ? (
-        <div ref={resultsRef} tabIndex={-1} className="grid scroll-mt-4 gap-4 outline-none">
+        <div
+          ref={resultsRef}
+          tabIndex={-1}
+          className="grid scroll-mt-[calc(24dvh+5rem)] gap-4 outline-none"
+        >
           <div className="rounded-lg border border-stone-700/70 bg-stone-950/58 p-4">
             {analysis.objects.length > 0 ? (
               <div className="border-b border-stone-800 pb-4">
@@ -594,6 +648,7 @@ export function CameraScanner() {
                 key={`${object.object_name}-${index}`}
                 result={object}
                 itemNumber={index + 1}
+                onAnalyzeFurther={() => handleAnalyzeFurther(object, index + 1)}
               />
             ))
           ) : (
@@ -610,6 +665,19 @@ export function CameraScanner() {
         <div className="rounded-lg border border-stone-700/70 bg-stone-950/45 p-4 text-sm leading-6 text-stone-400">
           Point the camera at electronics, tools, branded goods, furniture, art, books, historical objects, or
           anything with unusual labels, materials, or design, then analyze the frame.
+        </div>
+      ) : null}
+
+      {selectedItem ? (
+        <div ref={deepDiveRef} className="scroll-mt-[calc(24dvh+5rem)]">
+          <ItemDeepDive
+            key={`${selectedItem.itemNumber}-${selectedItem.imageLabel}`}
+            item={selectedItem.item}
+            itemNumber={selectedItem.itemNumber}
+            initialImage={selectedItem.image}
+            initialImageLabel={selectedItem.imageLabel}
+            onClose={handleCloseDeepDive}
+          />
         </div>
       ) : null}
 

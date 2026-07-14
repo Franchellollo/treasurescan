@@ -48,14 +48,17 @@ Included:
 - Frame capture to canvas
 - Captured-frame preview with clear analysis progress and automatic result focus
 - Numbered approximate object markers linked to result cards
+- Approximate object boxes used for on-demand image crops
 - Client-side image resizing and server-side image size validation
-- Next.js API route for analysis
+- Next.js API routes for scene and selected-item analysis
 - OpenAI Vision discovery scan with strict structured JSON and up to five candidates
 - Provisional EUR ranges based on visible model, brand, or category details
 - Server-calculated visible scene value total with duplicate-result protection
 - Candidate states for interesting, needs-close-up, and low-priority objects
 - Separate identification and pricing confidence
 - Result cards with value first, recommendation, confidence, score, period, and optional next-photo guidance
+- On-demand Item Deep Dive with an automatic crop or optional phone close-up
+- Sticky captured image that shrinks smoothly while results remain in view
 
 Not included yet:
 
@@ -69,5 +72,5 @@ Not included yet:
 1. Save scans to Supabase
 2. Add eBay sold data
 3. Add live auto-scan every few seconds
-4. Add bounding boxes/object overlay
+4. Save multi-angle close-ups with each item
 5. Add user accounts and paid credits
