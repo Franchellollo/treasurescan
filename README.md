@@ -58,7 +58,7 @@ Included:
 - Separate identification and pricing confidence
 - Result cards with value first, recommendation, confidence, score, period, and optional next-photo guidance
 - On-demand Item Deep Dive with an automatic crop or optional phone close-up
-- Sticky captured image that shrinks smoothly while results remain in view
+- Automatic scrolling from the captured image to the analysis results
 
 Not included yet:
 

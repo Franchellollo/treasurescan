@@ -94,7 +94,7 @@ export function ObjectResultCard({ result, itemNumber, onAnalyzeFurther }: Objec
   return (
     <article
       id={`treasure-result-${itemNumber}`}
-      className="scroll-mt-[calc(24dvh+5rem)] rounded-lg border border-stone-700/70 bg-stone-950/68 p-4 shadow-xl shadow-black/20 backdrop-blur"
+      className="scroll-mt-4 rounded-lg border border-stone-700/70 bg-stone-950/68 p-4 shadow-xl shadow-black/20 backdrop-blur"
     >
       <div className="flex items-start gap-3">
         <span

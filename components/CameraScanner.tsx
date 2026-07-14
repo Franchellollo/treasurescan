@@ -48,8 +48,6 @@ function parseEurRange(value: unknown): EurValueRange {
 }
 
 export function CameraScanner() {
-  const scannerSectionRef = useRef<HTMLElement | null>(null);
-  const capturedFrameRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -63,7 +61,6 @@ export function CameraScanner() {
   const [phase, setPhase] = useState<ScanPhase>("idle");
   const [analysis, setAnalysis] = useState<AnalyzeResponse>(emptyResponse);
   const [selectedItem, setSelectedItem] = useState<SelectedItem | null>(null);
-  const [isStickyCompact, setIsStickyCompact] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -127,65 +124,16 @@ export function CameraScanner() {
     if (phase !== "complete") return;
 
     const frame = window.requestAnimationFrame(() => {
-      const section = scannerSectionRef.current;
-      if (!section) return;
-
-      const sectionTop = section.getBoundingClientRect().top + window.scrollY;
-      const transitionDistance = Math.min(220, window.innerHeight * 0.28);
       const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-      window.scrollTo({
-        top: sectionTop + transitionDistance,
+      resultsRef.current?.scrollIntoView({
         behavior: reduceMotion ? "auto" : "smooth",
+        block: "start",
       });
       resultsRef.current?.focus({ preventScroll: true });
     });
 
     return () => window.cancelAnimationFrame(frame);
   }, [phase]);
-
-  useEffect(() => {
-    if (phase !== "complete") return;
-
-    let animationFrame = 0;
-    const aspectRatio = imageDimensions.width / imageDimensions.height;
-
-    const updateScrollProgress = () => {
-      animationFrame = 0;
-      const section = scannerSectionRef.current;
-      const capturedFrame = capturedFrameRef.current;
-      if (!section || !capturedFrame) return;
-
-      const progress = Math.max(
-        0,
-        Math.min(1, (8 - section.getBoundingClientRect().top) / 240),
-      );
-      const frameHeight = 72 - progress * 48;
-      capturedFrame.style.setProperty(
-        "--scan-frame-max-width",
-        `${aspectRatio * frameHeight}dvh`,
-      );
-      setIsStickyCompact((current) => {
-        const next = progress >= 0.7;
-        return current === next ? current : next;
-      });
-    };
-
-    const scheduleUpdate = () => {
-      if (animationFrame) return;
-      animationFrame = window.requestAnimationFrame(updateScrollProgress);
-    };
-
-    updateScrollProgress();
-    window.addEventListener("scroll", scheduleUpdate, { passive: true });
-    window.addEventListener("resize", scheduleUpdate);
-
-    return () => {
-      window.removeEventListener("scroll", scheduleUpdate);
-      window.removeEventListener("resize", scheduleUpdate);
-      if (animationFrame) window.cancelAnimationFrame(animationFrame);
-    };
-  }, [phase, imageDimensions.height, imageDimensions.width]);
 
   useEffect(() => {
     if (!selectedItem) return;
@@ -207,7 +155,6 @@ export function CameraScanner() {
     setError("");
     setAnalysis(emptyResponse);
     setSelectedItem(null);
-    setIsStickyCompact(false);
 
     const timeout = window.setTimeout(() => {
       timedOut = true;
@@ -311,7 +258,6 @@ export function CameraScanner() {
     setCapturedImage("");
     setAnalysis(emptyResponse);
     setSelectedItem(null);
-    setIsStickyCompact(false);
     setError("");
     setPhase("preparing");
 
@@ -335,7 +281,6 @@ export function CameraScanner() {
     setImageDimensions({ width: 4, height: 3 });
     setAnalysis(emptyResponse);
     setSelectedItem(null);
-    setIsStickyCompact(false);
     setError("");
     setPhase("idle");
   }
@@ -379,7 +324,7 @@ export function CameraScanner() {
   const aspectRatio = imageDimensions.width / imageDimensions.height;
   const capturedImageStyle = {
     aspectRatio: `${imageDimensions.width} / ${imageDimensions.height}`,
-    maxWidth: `var(--scan-frame-max-width, ${aspectRatio * 72}dvh)`,
+    maxWidth: `${aspectRatio * 72}dvh`,
   };
 
   const analyzeButtonText =
@@ -394,19 +339,11 @@ export function CameraScanner() {
             : "Analyze frame";
 
   return (
-    <section ref={scannerSectionRef} className="grid gap-5">
-      <div
-        className={`self-start overflow-hidden rounded-lg border border-stone-700/70 bg-black shadow-2xl shadow-black/35 ${
-          phase === "complete" ? "sticky top-2 z-20" : ""
-        }`}
-      >
+    <section className="grid gap-5">
+      <div className="overflow-hidden rounded-lg border border-stone-700/70 bg-black shadow-2xl shadow-black/35">
         {capturedImage ? (
           <div className="flex w-full justify-center bg-black">
-            <div
-              ref={capturedFrameRef}
-              className="relative w-full overflow-hidden transition-[max-width] duration-75 ease-linear motion-reduce:transition-none"
-              style={capturedImageStyle}
-            >
+            <div className="relative w-full overflow-hidden" style={capturedImageStyle}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={capturedImage}
@@ -487,18 +424,12 @@ export function CameraScanner() {
           </div>
         )}
 
-        <div
-          className={`border-t border-stone-800 bg-stone-950/94 transition-[padding] ${
-            phase === "complete" && isStickyCompact ? "p-2" : "p-4"
-          }`}
-        >
+        <div className="border-t border-stone-800 bg-stone-950/94 p-4">
           {capturedImage ? (
             <div
               role="status"
               aria-live="polite"
-              className={`mb-3 rounded-md border border-stone-700 bg-stone-900/80 p-3 ${
-                phase === "complete" && isStickyCompact ? "hidden" : ""
-              }`}
+              className="mb-3 rounded-md border border-stone-700 bg-stone-900/80 p-3"
             >
               {phase === "ready" ? (
                 <div className="flex items-center gap-2 text-sm font-semibold text-stone-100">
@@ -579,9 +510,7 @@ export function CameraScanner() {
               <button
                 type="button"
                 onClick={handleBackToCamera}
-                className={`flex-1 rounded-md border border-stone-700 px-4 text-sm font-semibold text-stone-100 transition hover:border-stone-500 hover:bg-stone-900 ${
-                  phase === "complete" && isStickyCompact ? "h-10" : "h-12"
-                }`}
+                className="h-12 flex-1 rounded-md border border-stone-700 px-4 text-sm font-semibold text-stone-100 transition hover:border-stone-500 hover:bg-stone-900"
               >
                 Back to camera
               </button>
@@ -609,7 +538,7 @@ export function CameraScanner() {
         <div
           ref={resultsRef}
           tabIndex={-1}
-          className="grid scroll-mt-[calc(24dvh+5rem)] gap-4 outline-none"
+          className="grid scroll-mt-4 gap-4 outline-none"
         >
           <div className="rounded-lg border border-stone-700/70 bg-stone-950/58 p-4">
             {analysis.objects.length > 0 ? (
@@ -669,7 +598,7 @@ export function CameraScanner() {
       ) : null}
 
       {selectedItem ? (
-        <div ref={deepDiveRef} className="scroll-mt-[calc(24dvh+5rem)]">
+        <div ref={deepDiveRef} className="scroll-mt-4">
           <ItemDeepDive
             key={`${selectedItem.itemNumber}-${selectedItem.imageLabel}`}
             item={selectedItem.item}

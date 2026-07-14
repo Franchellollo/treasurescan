@@ -149,7 +149,7 @@ export function ItemDeepDive({
   const isBusy = phase === "preparing" || phase === "analyzing";
 
   return (
-    <section className="scroll-mt-[calc(24dvh+5rem)] rounded-lg border border-amber-200/20 bg-stone-950/72 p-4 shadow-2xl shadow-black/25 sm:p-5">
+    <section className="scroll-mt-4 rounded-lg border border-amber-200/20 bg-stone-950/72 p-4 shadow-2xl shadow-black/25 sm:p-5">
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-300/75">
