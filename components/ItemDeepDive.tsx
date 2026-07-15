@@ -166,12 +166,12 @@ export function ItemDeepDive({
         </button>
       </div>
 
-      <div className="mt-4 overflow-hidden rounded-md border border-stone-800 bg-black">
+      <div className="relative mt-4 aspect-[4/3] overflow-hidden rounded-md border border-stone-800 bg-black">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={sourceImage}
           alt={`Selected view of ${item.object_name}`}
-          className="max-h-[50dvh] w-full object-contain"
+          className="absolute inset-0 h-full w-full object-contain"
         />
       </div>
 

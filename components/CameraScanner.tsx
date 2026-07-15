@@ -321,10 +321,8 @@ export function CameraScanner() {
   const canAnalyze = Boolean(capturedImage) || cameraReady;
   const itemCount = analysis.objects.length;
   const itemLabel = itemCount === 1 ? "item" : "items";
-  const aspectRatio = imageDimensions.width / imageDimensions.height;
   const capturedImageStyle = {
     aspectRatio: `${imageDimensions.width} / ${imageDimensions.height}`,
-    maxWidth: `${aspectRatio * 72}dvh`,
   };
 
   const analyzeButtonText =
@@ -376,7 +374,7 @@ export function CameraScanner() {
                         onClick={() => handleMarkerClick(itemNumber)}
                         aria-label={`View item ${itemNumber}: ${object.object_name}`}
                         title={object.object_name}
-                        className="absolute grid h-8 w-8 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border-2 border-stone-950 bg-amber-300 text-sm font-black text-stone-950 shadow-[0_2px_16px_rgba(0,0,0,0.75)] transition hover:scale-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-100"
+                        className="absolute grid h-8 w-8 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border-2 border-stone-950 bg-amber-300 text-sm font-black text-stone-950 shadow-[0_2px_16px_rgba(0,0,0,0.75)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-100"
                         style={{ left: `${object.marker.x}%`, top: `${object.marker.y}%` }}
                       >
                         {itemNumber}
@@ -387,7 +385,7 @@ export function CameraScanner() {
             </div>
           </div>
         ) : (
-          <div className="relative aspect-[3/4] max-h-[72dvh] min-h-[420px] w-full sm:aspect-video sm:min-h-0">
+          <div className="relative aspect-[3/4] w-full sm:aspect-video">
             <video
               ref={videoRef}
               className="h-full w-full object-cover"
