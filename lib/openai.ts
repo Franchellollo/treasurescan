@@ -1,7 +1,7 @@
 import type { EurValueRange, ObjectResult } from "@/components/ObjectResultCard";
 
 const DEFAULT_SCENE_MODEL = "gpt-5.6-terra";
-const DEFAULT_ITEM_MODEL = "gpt-4.1-mini";
+const DEFAULT_ITEM_MODEL = "gpt-5.6-terra";
 
 type VisionRequestOptions = {
   model: string;
