@@ -46,7 +46,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const result = await analyzeFrameWithOpenAI(body.imageBase64);
+    const result = await analyzeFrameWithOpenAI(body.imageBase64, request.signal);
     return NextResponse.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not analyze the frame.";

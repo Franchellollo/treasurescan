@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 import { cropImageToJpeg, prepareUploadedImage, renderImageToJpeg } from "@/lib/client-image";
 import { ItemDeepDive } from "./ItemDeepDive";
@@ -51,6 +51,7 @@ export function CameraScanner() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const cameraRequestIdRef = useRef(0);
   const analysisAbortRef = useRef<AbortController | null>(null);
   const resultsRef = useRef<HTMLDivElement | null>(null);
   const deepDiveRef = useRef<HTMLDivElement | null>(null);
@@ -63,62 +64,73 @@ export function CameraScanner() {
   const [selectedItem, setSelectedItem] = useState<SelectedItem | null>(null);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    let mounted = true;
+  const stopCamera = useCallback(() => {
+    cameraRequestIdRef.current += 1;
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    if (videoRef.current) videoRef.current.srcObject = null;
+    setCameraReady(false);
+  }, []);
 
-    async function startCamera() {
-      if (!navigator.mediaDevices?.getUserMedia) {
-        setCameraError("Camera is not available in this browser. Upload a photo instead.");
+  const startCamera = useCallback(async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCameraReady(false);
+      setCameraError("Camera is not available in this browser. Upload a photo instead.");
+      return;
+    }
+
+    const requestId = cameraRequestIdRef.current + 1;
+    cameraRequestIdRef.current = requestId;
+    setCameraReady(false);
+    setCameraError("");
+    let stream: MediaStream | null = null;
+
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+        audio: false,
+      });
+
+      if (cameraRequestIdRef.current !== requestId || !videoRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
         return;
       }
 
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: { ideal: "environment" },
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          },
-          audio: false,
-        });
+      streamRef.current = stream;
+      videoRef.current.srcObject = stream;
+      await videoRef.current.play();
 
-        if (!mounted) {
-          stream.getTracks().forEach((track) => track.stop());
-          return;
-        }
+      if (cameraRequestIdRef.current !== requestId) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
 
-        streamRef.current = stream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play();
-          setCameraReady(true);
-          setCameraError("");
-        }
-      } catch {
-        if (mounted) {
-          setCameraError("Camera permission failed. Upload a photo instead.");
-        }
+      setCameraReady(true);
+    } catch {
+      stream?.getTracks().forEach((track) => track.stop());
+      if (streamRef.current === stream) streamRef.current = null;
+      if (cameraRequestIdRef.current === requestId) {
+        setCameraReady(false);
+        setCameraError("Camera permission failed. Upload a photo instead.");
       }
     }
-
-    startCamera();
-
-    return () => {
-      mounted = false;
-      analysisAbortRef.current?.abort();
-      streamRef.current?.getTracks().forEach((track) => track.stop());
-    };
   }, []);
 
   useEffect(() => {
-    if (capturedImage || !videoRef.current || !streamRef.current) return;
+    if (capturedImage) return;
 
-    const video = videoRef.current;
-    video.srcObject = streamRef.current;
-    void video.play().then(() => setCameraReady(true)).catch(() => {
-      setCameraError("Could not restart the camera. Upload a photo instead.");
-    });
-  }, [capturedImage]);
+    const frame = window.requestAnimationFrame(() => void startCamera());
+    return () => window.cancelAnimationFrame(frame);
+  }, [capturedImage, startCamera]);
+
+  useEffect(() => () => {
+    analysisAbortRef.current?.abort();
+    stopCamera();
+  }, [stopCamera]);
 
   useEffect(() => {
     if (phase !== "complete") return;
@@ -239,6 +251,7 @@ export function CameraScanner() {
         video.videoHeight,
         canvas,
       );
+      stopCamera();
       setCapturedImage(prepared.dataUrl);
       setImageDimensions({ width: prepared.width, height: prepared.height });
       await analyzeImage(prepared.dataUrl);
@@ -253,6 +266,8 @@ export function CameraScanner() {
     const file = input.files?.[0];
     if (!file) return;
 
+    const shouldRestartCamera = Boolean(streamRef.current);
+    stopCamera();
     analysisAbortRef.current?.abort();
     analysisAbortRef.current = null;
     setCapturedImage("");
@@ -269,6 +284,7 @@ export function CameraScanner() {
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Could not prepare this photo.");
       setPhase("idle");
+      if (shouldRestartCamera) void startCamera();
     } finally {
       input.value = "";
     }
@@ -277,6 +293,7 @@ export function CameraScanner() {
   function handleBackToCamera() {
     analysisAbortRef.current?.abort();
     analysisAbortRef.current = null;
+    stopCamera();
     setCapturedImage("");
     setImageDimensions({ width: 4, height: 3 });
     setAnalysis(emptyResponse);

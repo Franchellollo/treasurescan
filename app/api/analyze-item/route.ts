@@ -94,7 +94,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const result = await analyzeItemWithOpenAI(body.imageBase64, objectContext);
+    const result = await analyzeItemWithOpenAI(body.imageBase64, objectContext, request.signal);
     return NextResponse.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not analyze this item.";

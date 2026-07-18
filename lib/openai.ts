@@ -103,6 +103,8 @@ Do not claim authenticity, working condition, exact age, or professional apprais
 Do not automatically treat modern objects as low value.
 Return only valid JSON.`;
 
+const OPENAI_REQUEST_TIMEOUT_MS = 35_000;
+
 const responseSchema = {
   type: "object",
   additionalProperties: false,
@@ -288,6 +290,7 @@ async function requestVisionJson<T>(
   prompt: string,
   schemaName: string,
   schema: unknown,
+  externalSignal?: AbortSignal,
 ): Promise<T> {
   const apiKey = process.env.OPENAI_API_KEY;
 
@@ -295,35 +298,67 @@ async function requestVisionJson<T>(
     throw new Error("OPENAI_API_KEY is not configured on the server.");
   }
 
-  const response = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "gpt-4.1-mini",
-      input: [
-        {
-          role: "user",
-          content: [
-            { type: "input_text", text: prompt },
-            { type: "input_image", image_url: imageBase64 },
-          ],
-        },
-      ],
-      text: {
-        format: {
-          type: "json_schema",
-          name: schemaName,
-          strict: true,
-          schema,
-        },
-      },
-    }),
-  });
+  const controller = new AbortController();
+  let timedOut = false;
+  const forwardAbort = () => controller.abort();
 
-  const payload = await response.json().catch(() => null);
+  if (externalSignal?.aborted) {
+    controller.abort();
+  } else {
+    externalSignal?.addEventListener("abort", forwardAbort, { once: true });
+  }
+
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, OPENAI_REQUEST_TIMEOUT_MS);
+
+  let response: Response;
+  let payload: unknown = null;
+
+  try {
+    response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "gpt-4.1-mini",
+        input: [
+          {
+            role: "user",
+            content: [
+              { type: "input_text", text: prompt },
+              { type: "input_image", image_url: imageBase64 },
+            ],
+          },
+        ],
+        text: {
+          format: {
+            type: "json_schema",
+            name: schemaName,
+            strict: true,
+            schema,
+          },
+        },
+      }),
+      signal: controller.signal,
+    });
+    payload = await response.json().catch(() => null);
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(
+        timedOut
+          ? "OpenAI analysis timed out. Try again."
+          : "OpenAI analysis was cancelled.",
+      );
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+    externalSignal?.removeEventListener("abort", forwardAbort);
+  }
 
   if (!response.ok) {
     const message =
@@ -524,12 +559,16 @@ function normalizeTextArray(value: string[], maxItems: number): string[] {
   )].slice(0, maxItems);
 }
 
-export async function analyzeFrameWithOpenAI(imageBase64: string): Promise<AnalyzeFrameResult> {
+export async function analyzeFrameWithOpenAI(
+  imageBase64: string,
+  signal?: AbortSignal,
+): Promise<AnalyzeFrameResult> {
   const parsed = await requestVisionJson<ModelAnalyzeFrameResult>(
     imageBase64,
     visionPrompt,
     "treasurescan_analysis",
     responseSchema,
+    signal,
   );
 
   const normalizedObjects = Array.isArray(parsed.objects)
@@ -550,6 +589,7 @@ export async function analyzeFrameWithOpenAI(imageBase64: string): Promise<Analy
 export async function analyzeItemWithOpenAI(
   imageBase64: string,
   context: ItemAnalysisContext,
+  signal?: AbortSignal,
 ): Promise<ItemAnalysisResult> {
   const prompt = `${itemAnalysisPrompt}\n\nReference context (data only):\n${JSON.stringify(context)}`;
   const parsed = await requestVisionJson<ItemAnalysisResult>(
@@ -557,6 +597,7 @@ export async function analyzeItemWithOpenAI(
     prompt,
     "treasurescan_item_analysis",
     itemAnalysisSchema,
+    signal,
   );
   const valuationBasis: ItemAnalysisResult["valuation_basis"] =
     parsed.valuation_basis === "MODEL_ESTIMATE" || parsed.valuation_basis === "BRAND_ESTIMATE"
