@@ -1,5 +1,13 @@
 import type { EurValueRange, ObjectResult } from "@/components/ObjectResultCard";
 
+const DEFAULT_SCENE_MODEL = "gpt-5.6-terra";
+const DEFAULT_ITEM_MODEL = "gpt-4.1-mini";
+
+type VisionRequestOptions = {
+  model: string;
+  imageDetail?: "auto" | "low" | "high" | "original";
+};
+
 type ModelAnalyzeFrameResult = {
   scene_summary: string;
   objects: ObjectResult[];
@@ -290,6 +298,7 @@ async function requestVisionJson<T>(
   prompt: string,
   schemaName: string,
   schema: unknown,
+  options: VisionRequestOptions,
   externalSignal?: AbortSignal,
 ): Promise<T> {
   const apiKey = process.env.OPENAI_API_KEY;
@@ -324,13 +333,17 @@ async function requestVisionJson<T>(
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "gpt-4.1-mini",
+        model: options.model,
         input: [
           {
             role: "user",
             content: [
               { type: "input_text", text: prompt },
-              { type: "input_image", image_url: imageBase64 },
+              {
+                type: "input_image",
+                image_url: imageBase64,
+                ...(options.imageDetail ? { detail: options.imageDetail } : {}),
+              },
             ],
           },
         ],
@@ -563,11 +576,16 @@ export async function analyzeFrameWithOpenAI(
   imageBase64: string,
   signal?: AbortSignal,
 ): Promise<AnalyzeFrameResult> {
+  const model = process.env.OPENAI_SCENE_MODEL?.trim() || DEFAULT_SCENE_MODEL;
   const parsed = await requestVisionJson<ModelAnalyzeFrameResult>(
     imageBase64,
     visionPrompt,
     "treasurescan_analysis",
     responseSchema,
+    {
+      model,
+      imageDetail: model.startsWith("gpt-5.6") ? "original" : "high",
+    },
     signal,
   );
 
@@ -597,6 +615,9 @@ export async function analyzeItemWithOpenAI(
     prompt,
     "treasurescan_item_analysis",
     itemAnalysisSchema,
+    {
+      model: process.env.OPENAI_ITEM_MODEL?.trim() || DEFAULT_ITEM_MODEL,
+    },
     signal,
   );
   const valuationBasis: ItemAnalysisResult["valuation_basis"] =

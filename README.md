@@ -16,9 +16,15 @@ Create `.env.local`:
 
 ```bash
 OPENAI_API_KEY=your_openai_api_key_here
+# Optional model overrides:
+# OPENAI_SCENE_MODEL=gpt-5.6-terra
+# OPENAI_ITEM_MODEL=gpt-4.1-mini
 ```
 
 The API key is only used by the server route and is never exposed to the browser.
+Scene scans use `gpt-5.6-terra` by default, while Item Deep Dive uses
+`gpt-4.1-mini`. Set `OPENAI_SCENE_MODEL=gpt-4.1-mini` in Vercel to restore the
+previous scene model without changing the code.
 
 ## Run
 
